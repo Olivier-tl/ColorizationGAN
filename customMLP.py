@@ -41,7 +41,7 @@ class OurDataset(Dataset):
 
 # loading based on https://gist.github.com/kevinzakka/d33bf8d6c7f06a9d8c76d97a7879f5cb
 
-data = OurDataset("./data/input/", "./data/target/") 
+data = OurDataset("./dataset/", "./dataset_target/") 
 
 batch_size = 1
 split = 0.1
@@ -71,7 +71,7 @@ class MLP(nn.Module):
 		self.length = len(dimensions)-1
 		for i in xrange(self.length):
 			self.layers.append( nn.Linear(dimensions[i], dimensions[i+1]) )
-		self.optimizer = optim.SGD(self.parameters(), lr=learning_rate)
+		self.optimizer = optim.SGD(self.parameters(), lr=0.01)
 		
 	def forward(self, image):
 		batch_size = image.size()[0]
@@ -81,69 +81,67 @@ class MLP(nn.Module):
 		x = F.log_softmax(self.layers[self.length-1](x), dim=0)
 		return x
 
+batch_size = 16
+RdN = MLP((320 * 240, 512, 512, 320 * 240 * 3))
+RdN.cuda()
+greyscale = torch.FloatTensor(batch_size, 1, 320, 240)
+greyscale =greyscale.cuda()
+color = torch.FloatTensor(batch_size, 3, 320, 240)
+color = color.cuda()
+criterion = nn.BCELoss()
+#criterion.cuda()
 
 
-def train(model):
-	model.train()
-	for batch_idx, (data, target) in enumerate(train_loader):
-		print(target.shape)
-		data, target = Variable(data.cuda()), Variable(target.cuda())
-		model.optimizer.zero_grad()
-		output = model(data)
-		loss = F.mse_loss(output, target)
+
+train_losses = 0.
+valid_losses = 0.
+test_losses = 0.
+
+for epoch in range(100):
+	train_losses = 0.
+	for i, (greyscaleImg,colorImg) in enumerate(train_loader, 0):
+		RdN.zero_grad()
+		#greyscaleImg = greyscaleImg.cuda()
+		#colorImg = colorImg.cuda()
+		greyscale.resize_as_(greyscaleImg).copy_(greyscaleImg)
+		color.resize_as_(colorImg).copy_(colorImg)
+		greyscaleVar = Variable(greyscale)
+		colorVar = Variable(color/255.)
+		#print("greyscaleVar", greyscaleVar.shape)
+		#print("colorVar", colorVar.shape)
+		output = RdN.forward(greyscaleVar)
+		loss = criterion(output, colorVar)
 		loss.backward()
-		model.optimizer.step()
-
-
-def test(model, loader, name):
-	model.eval()
-	test_loss = 0
-	correct = 0
-	for data, target in loader:
-		data, target = data.cuda(), target.cuda()
-		output = model(data)
-		test_loss += F.nll_loss(output, target, size_average=False).data[0] # sum u
-		pred = output.data.max(1, keepdim=True)[1] # get the index of the max l
-		correct += pred.eq(target.data.view_as(pred)).cpu().sum()
-	test_loss /= 10000
-	print (name , "set : Average loss:", test_loss, " Accuracy:", correct, "/", 10000, "=", 100. * correct / 10000, "%")
-	return test_loss, 100. * correct / 10000
-
-
-learning_rate = 0.05
-architectures = [[320 * 240, 512, 512, 320 * 240 * 3]]
-
-# redirect print to log file : https://stackoverflow.com/questions/2513479
-#old_stdout = sys.stdout
-#log_file = open("experiences.log","w")
-#sys.stdout = log_file
-
-
-
-for arc in architectures:
-	epochs = 350
-	print(arc)
+		RdN.optimizer.step()
+		train_losses += loss
+		
+	for i, (greyscaleImg,colorImg) in enumerate(valid_loader, 0):
+		greyscaleVar = Variable(greyscale)
+		colorVar = Variable(color/255.)
+		output = RdN.forward(greyscaleVar)
+		loss = criterion(output, colorVar)
+		valid_losses += loss
 	
-	RdN = MLP(arc)
-	RdN.cuda()
-	
-	losses =[]
-	
-	for epoch in range(1, epochs + 1):
-		train(RdN)
-		loss, accuracy = test(RdN, valid_loader, 'valid')
-		losses.append(loss)
-	loss, accuracy = test(RdN, test_loader, 'test')
-	
-	plt.title("Architecture : " + str(arc) + "  & Learning rate : " + str(learning_rate) + " (accuracy : " + str(accuracy)[:4] + ") ")
-	plt.ylabel("Average negative log likelihood")
-	plt.xlabel("Epoch")
-	plt.plot(losses, label="validation")
-	plt.legend()
-	plt.savefig(str(arc) + ".png") #plt.show()
-	plt.close()
+	print ("train set", epoch,"train err:", train_losses/(total * (1-2 * split)), " valid err:", valid_losses/(total * split))
 
-log_file.close()
+	
+for i, (greyscaleImg,colorImg) in enumerate(test_loader, 0):
+		output = RdN.forward(greyscaleImg)
+		loss = criterion(output, colorImg/255.)
+		test_losses += loss
+	
+print ("test set", epoch,"test err:", test_losses/(total * split))
+
+import random
+for i  in range(10):
+	greyscaleImg, colorImg = random.choice(data)
+	greyscaleVar = Variable(greyscale)
+	colorVar = Variable(color/255.)
+	output = RdN.forward(greyscaleVar)
+	img = Image.fromarray(np.uint8(output))
+	img.save( "test" + str(i) + ".jpg")
+
+
 
 
 
