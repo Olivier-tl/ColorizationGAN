@@ -24,11 +24,12 @@ except:
 for file in os.listdir(input):
 	#sobel filter
 	#based on https://stackoverflow.com/questions/7185655
-	im = scipy.misc.imread(input + file)
-	im = im.astype('int32')
-	dx = ndimage.sobel(im, 0)  # horizontal derivative
-	dy = ndimage.sobel(im, 1)  # vertical derivative
-	mag = numpy.hypot(dx, dy)  # magnitude
-	mag *= 255.0 / numpy.max(mag)  # normalize (Q&D)
-	scipy.misc.imsave(output + file, mag)
-	scipy.misc.imsave(output + file, mag)
+	if file.endswith(".jpg"):
+		im = scipy.misc.imread(input + "/" + file)
+		im = im.astype('int32')
+		dx = ndimage.sobel(im, 0)  # horizontal derivative
+		dy = ndimage.sobel(im, 1)  # vertical derivative
+		mag = numpy.hypot(dx, dy)  # magnitude
+		mag *= 255.0 / numpy.max(mag)  # normalize (Q&D)
+		scipy.misc.imsave(output + file, mag)
+		scipy.misc.imsave(output + file, mag)
