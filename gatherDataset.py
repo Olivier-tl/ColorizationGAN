@@ -1,5 +1,5 @@
 ###################################################
-##	gatherDataset.py : utility script for creating a dataset 
+##	gatherDataset.py : utility script for creating a dataset of jpeg images set to same size
 ##	@author Luc Courbariaux 2018
 ###################################################
 
@@ -13,7 +13,7 @@ from PIL import Image
 
 
 def resize(image, size):
-	# crops image to wanted ratio then resizes them
+	# crops image to wanted ratio then resizes it
 	# based on https://stackoverflow.com/questions/4744372/
 
 	width  = image.size[0]

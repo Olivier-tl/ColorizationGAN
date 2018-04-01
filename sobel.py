@@ -1,3 +1,8 @@
+###################################################
+##	sobel.py : utility script for applying a sobel filter to all images in a folder
+##	@author Luc Courbariaux 2018
+###################################################
+
 import argparse
 
 parser = argparse.ArgumentParser(description='gets all images in INPUT folder, applies a sobel filter them and puts them in OUTPUT directory.')
