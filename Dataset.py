@@ -9,6 +9,9 @@ from torch.utils.data.sampler import SubsetRandomSampler
 from torch.utils.data.dataset import Dataset
 from torch.utils.data import DataLoader
 
+import numpy as np
+from torchvision import transforms
+
 # takes images from a dataset path, and another to the target path
 # assumes that data and target photos have the same name
 class CustomDataset(Dataset):
@@ -34,38 +37,36 @@ class CustomDataset(Dataset):
 		return len(self.images)
 
 
+def generate(batch_size = 32, split = 0.1, datapath = "./dataset/", targetpath = "./dataset_target/"):
+	data = CustomDataset(datapath, targetpath) 
 
-data = CustomDataset("./dataset/", "./dataset_target/") 
-batch_size = 32
-split = 0.1
+	# loading based on https://gist.github.com/kevinzakka/d33bf8d6c7f06a9d8c76d97a7879f5cb
+	# creates  a list of indices
+	total = len(data)
+	indices = list(range(total))
 
+	# shuffles it
+	np.random.seed(50676)
+	np.random.shuffle(indices)
 
-# loading based on https://gist.github.com/kevinzakka/d33bf8d6c7f06a9d8c76d97a7879f5cb
+	# splits it : major part is train, 10% is valid, 10% test
+	train_idx, test_idx, valid_idx = indices[:int(total * (1-2*split))], indices[int(total * (1-2*split)):int(total * (1-split))], indices[int(total * (1-split)):]
 
-# creates  a list of indices
-total = len(data)
-indices = list(range(total))
+	# sampler objects that use those indices
+	train_sampler = SubsetRandomSampler(train_idx)
+	valid_sampler = SubsetRandomSampler(valid_idx)
+	test_sampler = SubsetRandomSampler(test_idx)
 
-# shuffles it
-np.random.seed(50676)
-np.random.shuffle(indices)
+	# the loaders that will be used by the neural network
+	train_loader = DataLoader( data, batch_size=batch_size, sampler=train_sampler)
+	valid_loader = DataLoader( data, batch_size=batch_size, sampler=valid_sampler)
+	test_loader = DataLoader( data, batch_size=batch_size, sampler=test_sampler)
+	
+	return train_loader, valid_loader, test_loader
 
-# splits it : major part is train, 10% is valid, 10% test
-train_idx, test_idx, valid_idx = indices[:int(total * (1-2*split))], indices[int(total * (1-2*split)):int(total * (1-split))], indices[int(total * (1-split)):]
-
-# sampler objects that use those indices
-train_sampler = SubsetRandomSampler(train_idx)
-valid_sampler = SubsetRandomSampler(valid_idx)
-test_sampler = SubsetRandomSampler(test_idx)
-
-# the loaders that will be used by the neural network
-train_loader = DataLoader( data, batch_size=batch_size, sampler=train_sampler)
-valid_loader = DataLoader( data, batch_size=batch_size, sampler=valid_sampler)
-test_loader = DataLoader( data, batch_size=batch_size, sampler=test_sampler)
-
-# for i, (greyscaleImg,colorImg) in enumerate(train_loader, 0): use data
-
-
+# use case : 
+# for i, (greyscaleImg,colorImg) in enumerate(train_loader, 0): 
+#		<...>
 
 
 
