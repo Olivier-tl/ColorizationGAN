@@ -72,6 +72,9 @@ parser.add_argument('--manualSeed', type=int, help='manual seed')
 
 # Holds console output
 logs = []
+with open('log.csv', 'a') as f:
+    writer = csv.writer(f)
+    writer.writerow('New experiment')
 
 opt = parser.parse_args()
 print(opt)
@@ -144,39 +147,36 @@ class _netG(nn.Module):
             nn.LeakyReLU(0.2, inplace=True)
         )
         # state size. (ndf*8) x 6 x 10
-        self.layer5 = nn.Conv2d(ndf * 8, ndf * 8, 3, 1, 0, bias=False)
+        self.layer5 = nn.Conv2d(ndf * 8, ndf * 8, 3, stride=1, padding=0, bias=False)
         
         # Deconvolution Layers
-        # state size. (ndf*8) x 6 x 10
+        # state size. (ndf*8) x 4 x 8
         self.reverseLayer5 = nn.Sequential(
-            nn.ConvTranspose2d(ndf * 8, ndf * 8, 4, 1, 0, bias=False),
+            nn.ConvTranspose2d(ndf * 8, ndf * 8, 3, stride=1, padding=0, bias=False),
             nn.BatchNorm2d(ndf * 8),
             nn.ReLU(True)
         )
-        # state size. (ndf*8) x 8 x 16
+        # state size. (ndf*8) x 6 x 10
         self.reverseLayer4 = nn.Sequential(
-            nn.ConvTranspose2d(ndf * 8, ndf * 4, 4, stride=2, padding=1, bias=False),
+            nn.ConvTranspose2d(ndf * 16, ndf * 4, 4, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(ndf * 4),
             nn.ReLU(True)
         )
-        # state size. (ndf*4) x 8 x 8
+        # state size. (ndf*4) x 12 x 20
         self.reverseLayer3 = nn.Sequential(
-            nn.Conv2d(ndf * 8, ndf * 4, 1, stride=1, padding=0, bias=False),
-            nn.ConvTranspose2d(ndf * 4, ndf * 2, 4, stride=2, padding=1, bias=False),
+            nn.ConvTranspose2d(ndf * 8, ndf * 2, 4, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(ndf * 2),
             nn.ReLU(True)
         )
         # state size. (ndf*2) x 16 x 16
         self.reverseLayer2 = nn.Sequential(
-            nn.Conv2d(ndf * 4, ndf * 2, 1, stride=1, padding=0, bias=False),
-            nn.ConvTranspose2d(ndf * 2,     ndf, 4, stride=2, padding=1, bias=False),
+            nn.ConvTranspose2d(ndf * 4, ndf, 4, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(ndf),
             nn.ReLU(True)
         )
         # state size. (ndf) x 32 x 32
         self.reverseLayer1 = nn.Sequential(
-            nn.Conv2d(ndf * 2, ndf, 1, stride=1, padding=0, bias=False),
-            nn.ConvTranspose2d(    ndf,      nc, 4, stride=2, padding=1, bias=False),
+            nn.ConvTranspose2d(ndf * 2, nc, 4, stride=2, padding=1, bias=False),
             nn.Tanh()
         )
 
@@ -190,7 +190,8 @@ class _netG(nn.Module):
         resLayer3 = self.layer3(resLayer2)
         resLayer4 = self.layer4(resLayer3)
         resLayer5 = self.layer5(resLayer4)
-        resReverseLayer4 = self.reverseLayer4(resLayer4)
+        resReverseLayer5 = self.reverseLayer5(resLayer5)
+        resReverseLayer4 = self.reverseLayer4(torch.cat((resLayer4,resReverseLayer5), 1))
         resReverseLayer3 = self.reverseLayer3(torch.cat((resLayer3,resReverseLayer4), 1))
         resReverseLayer2 = self.reverseLayer2(torch.cat((resLayer2,resReverseLayer3), 1))
         output = self.reverseLayer1(torch.cat((resLayer1,resReverseLayer2), 1))
@@ -234,9 +235,10 @@ class _netD(nn.Module):
             # state size. (ndf*8) x 6 x 10
             nn.Conv2d(ndf * 8, 1, 3, stride=1, padding=0),
             # state size. 1 x 4 x 8
+            nn.Conv2d(1,1,(8,4),stride=1,padding=0),
             nn.Sigmoid()
         )
-        self.final = nn.Conv2d(1,1,(8,4),stride=1,padding=0)
+        # self.final = 
 
     def forward(self, greyscale, color):
         greyscale = self.greyscalePre(greyscale)
@@ -246,8 +248,8 @@ class _netD(nn.Module):
             output = nn.parallel.data_parallel(self.main, input, range(self.ngpu))
         else:
             output = self.main(input)
-        output = self.final(output)
-        return (output.view(-1, 1).squeeze(1)+1)/2
+        # output = self.final(output)
+        return output.view(-1, 1).squeeze(1)
 
 
 netD = _netD(ngpu)
@@ -258,8 +260,8 @@ print(netD)
 
 criterion = nn.BCELoss()
 
-greyscale = torch.FloatTensor(opt.batchSize, 1, opt.imageSize, opt.imageSize)
-color = torch.FloatTensor(opt.batchSize, 3, opt.imageSize, opt.imageSize)
+greyscale = torch.FloatTensor(opt.batchSize, 1, 160, 96)
+color = torch.FloatTensor(opt.batchSize, 3, 160, 96)
 label = torch.FloatTensor(opt.batchSize)
 real_label = 1
 fake_label = 0
@@ -306,7 +308,7 @@ for epoch in range(opt.niter):
         D_G_z1 = output.data.mean()
         errD = errD_real + errD_fake
         optimizerD.step()
-
+        # if i % 3 == 0:
         ############################
         # (2) Update G network: maximize log(D(G(z)))
         ###########################
@@ -321,7 +323,10 @@ for epoch in range(opt.niter):
         print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f D(x): %.4f D(G(z)): %.4f / %.4f'
               % (epoch, opt.niter, i, len(dataloader),
                  errD.data[0], errG.data[0], D_x, D_G_z1, D_G_z2))
-        logs.append([epoch, i, errD.data[0], errG.data[0], D_x, D_G_z1, D_G_z2])
+
+        with open('log.csv', 'a') as f:
+            writer = csv.writer(f)
+            writer.writerow([epoch, i, errD.data[0], errG.data[0], D_x, D_G_z1, D_G_z2])
         if i % 100 == 0:
             vutils.save_image(color,
                     '%s/real_samples.png' % opt.outf,
@@ -334,9 +339,3 @@ for epoch in range(opt.niter):
     # do checkpointing
     torch.save(netG.state_dict(), '%s/netG_epoch_%d.pth' % (opt.outf, epoch))
     torch.save(netD.state_dict(), '%s/netD_epoch_%d.pth' % (opt.outf, epoch))
-# Write report in csv
-
-with open('log.csv', 'a') as f:
-    writer = csv.writer(f)
-    for row in logs:
-        writer.writerow(row)
