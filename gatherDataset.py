@@ -1,5 +1,5 @@
 ###################################################
-##	init.py : utility script for creating a dataset 
+##	gatherDataset.py : utility script for creating a dataset of jpeg images set to same size
 ##	@author Luc Courbariaux 2018
 ###################################################
 
@@ -11,13 +11,14 @@ import argparse
 import os
 from PIL import Image
 
-# crops image to wanted ratio then resizes them
+
 def resize(image, size):
+	# crops image to wanted ratio then resizes it
 	# based on https://stackoverflow.com/questions/4744372/
 
 	width  = image.size[0]
 	height = image.size[1]
-	print("original size : ", image.size)
+	#print("original size : ", image.size)
 
 	aspect = width / float(height)
 
