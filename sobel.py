@@ -14,6 +14,7 @@ args = parser.parse_args()
 
 import os
 import numpy
+from PIL import Image
 import scipy
 from scipy import ndimage
 
@@ -29,12 +30,14 @@ except:
 for file in os.listdir(input):
 	#sobel filter
 	#based on https://stackoverflow.com/questions/7185655
-	if file.endswith(".jpg"):
+	if file.endswith(".jpg") or file.endswith(".bmp") :
 		im = scipy.misc.imread(input + "/" + file)
 		im = im.astype('int32')
 		dx = ndimage.sobel(im, 0)  # horizontal derivative
 		dy = ndimage.sobel(im, 1)  # vertical derivative
 		mag = numpy.hypot(dx, dy)  # magnitude
 		mag *= 255.0 / numpy.max(mag)  # normalize (Q&D)
-		scipy.misc.imsave(output + file, mag)
-		scipy.misc.imsave(output + file, mag)
+		mag = mag.mean(axis=2)
+		mag = mag.astype("uint8")
+		img = Image.fromarray(mag)
+		img.save(output + "/" + file)

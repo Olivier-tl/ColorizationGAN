@@ -26,12 +26,18 @@ class CustomDataset(Dataset):
 	def __getitem__(self, index):
 		data = Image.open(self.datapath + self.images[index])
 		data = data.convert('1') # the input data is in hues of grey, ie 1 byte per pixel
-		if self.transform is not None:
-			img = self.transform(img)
+		
 		target = Image.open(self.targetpath + self.images[index])
 		target = target.convert('RGB') # the target data is in RGB, ie 3 byte per pixel
-		# returns data, target (! don't confuse with target, data as in GAN script)
-		return self.toTensor(np.array(data).flatten().astype("float")), self.toTensor(np.array(target).flatten().astype("float")) # flattens the image and makes it a float  vector
+		
+		data = self.toTensor(np.array(data).astype("float"))
+		target = self.toTensor(np.array(target).astype("float"))
+		
+		if self.transform is not None:
+			data = self.transform(data)
+			target = self.transform(target)
+			
+		return target, data
 
 	def __len__(self):
 		return len(self.images)

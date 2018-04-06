@@ -60,6 +60,9 @@ args = parser.parse_args()
 
 
 outputDirectory = args.output
+if not outputDirectory.endswith("/"):
+	outputDirectory += "/"
+
 size = args.size.split(",")
 size = (int(size[0]), int(size[1]))
 #print(size)
@@ -96,7 +99,8 @@ while len(paths) !=0:
 				#shutil.copy(filePath, newPath)
 				img = Image.open(filePath)
 				img = resize(img, size)
-				img.save(newPath, "JPEG")
+				#img.save(newPath[:-3] + "jpg", "JPEG")
+				img.save(newPath[:-3] + "bmp", "BMP")
 			
 			else:
 				
