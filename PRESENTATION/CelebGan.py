@@ -327,17 +327,17 @@ for epoch in range(opt.niter):
         #label.resize_(batch_size).random_(0.7, 1.0)
         greyscaleVar = Variable(greyscale)
         colorVar = Variable(color)
-        labelv = Variable(label)
+        labelv = Variable(torch.rand(label.size())*0.3+0.7)#Variable(label)
 
-        output = netD(greyscaleVar, colorVar)
+        output = netD(greyscaleVar + Variable(torch.rand(greyscaleImg.size())), colorVar)
         errD_real = criterion(output, labelv)
         errD_real.backward()
         D_x = output.data.mean()
 
         # train with fake
-        fake = netG(greyscaleVar.detach())
-        labelv = Variable(label.fill_(fake_label))
-        output = netD(greyscaleVar.detach(),fake.detach())
+        fake = netG(greyscaleVar.detach() + Variable(torch.rand(greyscaleImg.size())))
+        labelv = Variable(torch.rand(label.size())*0.3)
+        output = netD(greyscaleVar.detach() + Variable(torch.rand(greyscaleImg.size())),fake.detach())
         errD_fake = criterion(output, labelv)
         errD_fake.backward()
         D_G_z1 = output.data.mean()
@@ -350,7 +350,7 @@ for epoch in range(opt.niter):
         ###########################
         if i % 2 == 0:
             netG.zero_grad()
-            labelv = Variable(label.fill_(real_label))  # fake labels are real for generator cost
+            labelv = Variable(torch.rand(label.size())*0.3+0.7)  # fake labels are real for generator cost
             output = netD(greyscaleVar.detach(), fake)
             errG = criterion(output, labelv)
             errG.backward()
