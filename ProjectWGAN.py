@@ -1,0 +1,445 @@
+from __future__ import print_function
+import argparse
+import os
+import os.path
+import random
+import csv
+from PIL import Image, ImageCms
+import torch
+import torch.nn as nn
+import torch.nn.parallel
+import torch.backends.cudnn as cudnn
+import torch.optim as optim
+import torch.utils.data
+import torchvision.datasets as dset
+import torchvision.transforms as transforms
+import torchvision.utils as vutils
+from torch.autograd import Variable
+
+class ColorBWDataset(torch.utils.data.Dataset):
+
+    def __init__(self, root_dir):
+        """
+        Args:
+            root_dir (string): Directory with all the images.
+        """
+        self.greyImgsPath = []
+        self.colorImgsPath = []
+
+        mean = (0.5, 0.5, 0.5)
+        std = (0.5, 0.5, 0.5)
+        self.transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean=mean, std=std)])
+
+        dir = os.path.expanduser(root_dir)
+        colorDir = os.path.join(dir, "color")
+        greyDir = os.path.join(dir, "grey")
+
+        for root, _, fnames in sorted(os.walk(colorDir)):
+            for fname in sorted(fnames):
+                self.colorImgsPath.append(os.path.join(colorDir, fname))
+
+        for root, _, fnames in sorted(os.walk(greyDir)):
+            for fname in sorted(fnames):
+                self.greyImgsPath.append(os.path.join(greyDir, fname))
+
+    def __len__(self):
+        return len(self.colorImgsPath)
+
+    def __getitem__(self, idx):
+        colorImage = Image.open(self.colorImgsPath[idx]).convert('RGB')
+        greyImage  = Image.open(self.greyImgsPath[idx])
+        colorImage = self.transform(colorImage)
+        greyImage  = self.transform(greyImage)
+        return (colorImage, greyImage)
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--dataset', required=True, help='cifar10 | lsun | imagenet | folder | lfw | fake')
+parser.add_argument('--dataroot', required=True, help='path to dataset')
+parser.add_argument('--workers', type=int, help='number of data loading workers', default=2)
+parser.add_argument('--batchSize', type=int, default=64, help='input batch size')
+parser.add_argument('--imageSize', type=int, default=64, help='the height / width of the input image to network')
+parser.add_argument('--Diters', type=int, default=5, help='number of D iters per each G iter')
+parser.add_argument('--nz', type=int, default=100, help='size of the latent z vector')
+parser.add_argument('--ngf', type=int, default=64)
+parser.add_argument('--ndf', type=int, default=64)
+parser.add_argument('--niter', type=int, default=25, help='number of epochs to train for')
+parser.add_argument('--lr', type=float, default=0.00005, help='learning rate, default=0.0002')
+parser.add_argument('--beta1', type=float, default=0.5, help='beta1 for adam. default=0.5')
+parser.add_argument('--cuda', action='store_true', help='enables cuda')
+parser.add_argument('--ngpu', type=int, default=1, help='number of GPUs to use')
+parser.add_argument('--netG', default='', help="path to netG (to continue training)")
+parser.add_argument('--netD', default='', help="path to netD (to continue training)")
+parser.add_argument('--outf', default='.', help='folder to output images and model checkpoints')
+parser.add_argument('--manualSeed', type=int, help='manual seed')
+parser.add_argument('--clamp_lower', type=float, default=-0.01)
+parser.add_argument('--clamp_upper', type=float, default=0.01)
+
+# Holds console output
+logs = []
+with open('log.csv', 'a') as f:
+    writer = csv.writer(f)
+    writer.writerow('New experiment')
+
+opt = parser.parse_args()
+print(opt)
+
+try:
+    os.makedirs(opt.outf)
+except OSError:
+    pass
+
+if opt.manualSeed is None:
+    opt.manualSeed = random.randint(1, 10000)
+print("Random Seed: ", opt.manualSeed)
+random.seed(opt.manualSeed)
+torch.manual_seed(opt.manualSeed)
+if opt.cuda:
+    torch.cuda.manual_seed_all(opt.manualSeed)
+
+cudnn.benchmark = True
+
+if torch.cuda.is_available() and not opt.cuda:
+    print("WARNING: You have a CUDA device, so you should probably run with --cuda")
+
+
+dataset = ColorBWDataset(opt.dataroot)
+dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchSize,
+                                         shuffle=True, num_workers=int(opt.workers))
+
+ngpu = int(opt.ngpu)
+nz = 1
+ngf = int(opt.ngf)
+ndf = 64
+nc = 3
+
+
+# custom weights initialization called on netG and netD
+def weights_init(m):
+    classname = m.__class__.__name__
+    if classname.find('Conv') != -1:
+        m.weight.data.normal_(0.0, 0.02)
+    elif classname.find('BatchNorm') != -1:
+        m.weight.data.normal_(1.0, 0.02)
+        m.bias.data.fill_(0)
+
+
+class _netG(nn.Module):
+    def __init__(self, ngpu):
+        super(_netG, self).__init__()
+        self.ngpu = ngpu
+        # input is (nc) x 96 x 160
+        self.layer1 = nn.Sequential(
+            nn.Conv2d(1, ndf, 3, stride=2, padding=1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True)
+        )
+        # state size. (ndf) x 48 x 80
+        self.layer2 = nn.Sequential(
+            nn.Conv2d(ndf, ndf * 2, 3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(ndf * 2),
+            nn.LeakyReLU(0.2, inplace=True)
+        )
+        # state size. (ndf*2) x 24 x 40
+        self.layer3 = nn.Sequential(
+            nn.Conv2d(ndf * 2, ndf * 4, 3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(ndf * 4),
+            nn.LeakyReLU(0.2, inplace=True)
+        )
+        # state size. (ndf*4) x 12 x 20
+        self.layer4 = nn.Sequential(
+            nn.Conv2d(ndf * 4, ndf * 8, 3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(ndf * 8),
+            nn.LeakyReLU(0.2, inplace=True)
+        )
+        # state size. (ndf*8) x 6 x 10
+        self.layer5 = nn.Conv2d(ndf * 8, ndf * 8, 3, stride=1, padding=0, bias=False)
+        
+        # Deconvolution Layers
+        # state size. (ndf*8) x 4 x 8
+        self.reverseLayer5 = nn.Sequential(
+            nn.ConvTranspose2d(ndf * 8, ndf * 8, 3, stride=1, padding=0, bias=False),
+            nn.BatchNorm2d(ndf * 8),
+            nn.ReLU(True)
+        )
+        # state size. (ndf*8) x 6 x 10
+        self.reverseLayer4 = nn.Sequential(
+            nn.ConvTranspose2d(ndf * 16, ndf * 4, 4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(ndf * 4),
+            nn.ReLU(True)
+        )
+        # state size. (ndf*4) x 12 x 20
+        self.reverseLayer3 = nn.Sequential(
+            nn.ConvTranspose2d(ndf * 8, ndf * 2, 4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(ndf * 2),
+            nn.ReLU(True)
+        )
+        # state size. (ndf*2) x 16 x 16
+        self.reverseLayer2 = nn.Sequential(
+            nn.ConvTranspose2d(ndf * 4, ndf, 4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(ndf),
+            nn.ReLU(True)
+        )
+        # state size. (ndf) x 32 x 32
+        self.reverseLayer1 = nn.Sequential(
+            nn.ConvTranspose2d(ndf * 2, 3, 4, stride=2, padding=1, bias=False),
+            nn.Tanh()
+        )
+
+    def forward(self, input):
+        # if isinstance(input.data, torch.cuda.FloatTensor) and self.ngpu > 1:
+        #     output = nn.parallel.data_parallel(self.main, input, range(self.ngpu))
+        # else:
+        #     output = self.main(input)
+        resLayer1 = self.layer1(input)
+        resLayer2 = self.layer2(resLayer1)
+        resLayer3 = self.layer3(resLayer2)
+        resLayer4 = self.layer4(resLayer3)
+        resLayer5 = self.layer5(resLayer4)
+        resReverseLayer5 = self.reverseLayer5(resLayer5)
+        resReverseLayer4 = self.reverseLayer4(torch.cat((resLayer4,resReverseLayer5), 1))
+        resReverseLayer3 = self.reverseLayer3(torch.cat((resLayer3,resReverseLayer4), 1))
+        resReverseLayer2 = self.reverseLayer2(torch.cat((resLayer2,resReverseLayer3), 1))
+        output = self.reverseLayer1(torch.cat((resLayer1,resReverseLayer2), 1))
+        # output = torch.cat((input, output),1)
+        return output
+
+
+netG = _netG(ngpu)
+netG.apply(weights_init)
+if opt.netG != '':
+    netG.load_state_dict(torch.load(opt.netG))
+print(netG)
+
+
+class _netD(nn.Module):
+    def __init__(self, ngpu):
+        super(_netD, self).__init__()
+        self.ngpu = ngpu
+        self.colorPre = nn.Sequential(
+            # input is (nc) x 96 x 160
+            nn.Conv2d(nc, ndf, 3, stride=2, padding=1),
+            nn.LeakyReLU(0.2, inplace=True)
+        )
+        self.greyscalePre = nn.Sequential(
+            # input is (nc) x 96 x 160
+            nn.Conv2d(1, ndf, 3, stride=2, padding=1),
+            nn.LeakyReLU(0.2, inplace=True)
+        )
+        self.main = nn.Sequential(
+            # state size. (ndf) x 48 x 80
+            nn.Conv2d(ndf*2, ndf * 2, 3, stride=2, padding=1),
+            nn.BatchNorm2d(ndf * 2),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*2) x 24 x 40
+            nn.Conv2d(ndf * 2, ndf * 4, 3, stride=2, padding=1),
+            nn.BatchNorm2d(ndf * 4),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*4) x 12 x 20
+            nn.Conv2d(ndf * 4, ndf * 8, 3, stride=2, padding=1),
+            nn.BatchNorm2d(ndf * 8),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*8) x 6 x 10
+            nn.Conv2d(ndf * 8, 1, 3, stride=1, padding=0),
+            nn.BatchNorm2d(1),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. 1 x 4 x 8
+            nn.Conv2d(1,1,(8,4),stride=1,padding=0)
+        )
+
+    def forward(self, greyscale, color):
+        greyscale = self.greyscalePre(greyscale)
+        color = self.colorPre(color)
+        input = torch.cat((greyscale, color),1)
+        if isinstance(input.data, torch.cuda.FloatTensor) and self.ngpu > 1:
+            output = nn.parallel.data_parallel(self.main, input, range(self.ngpu))
+        else:
+            output = self.main(input)
+        output = output.mean(0)              
+        return output.view(1)
+
+
+netD = _netD(ngpu)
+netD.apply(weights_init)
+if opt.netD != '':
+    netD.load_state_dict(torch.load(opt.netD))
+print(netD)
+
+noise = torch.FloatTensor(opt.batchSize, 1, 160, 96)
+fixed_noise = torch.FloatTensor(opt.batchSize, 1, 160, 96).normal_(0, 1)
+one = torch.FloatTensor([1])
+mone = one * 0
+
+greyscale = torch.FloatTensor(opt.batchSize, 1, 160, 96)
+color = torch.FloatTensor(opt.batchSize, 3, 160, 96)
+
+if opt.cuda:
+    netD.cuda()
+    netG.cuda()
+    greyscale = greyscale.cuda()
+    color = color.cuda()
+    noise = noise.cuda()
+    fixed_noise = fixed_noise.cuda()
+
+# setup optimizer
+# optimizerD = optim.Adam(netD.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
+# optimizerG = optim.Adam(netG.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
+
+optimizerD = optim.RMSprop(netD.parameters(), lr = opt.lr)
+optimizerG = optim.RMSprop(netG.parameters(), lr = opt.lr)
+
+
+gen_iterations = 0
+for epoch in range(opt.niter):
+    data_iter = iter(dataloader)
+    i = 0
+    while i < len(dataloader):
+        ############################
+        # (1) Update D network
+        ###########################
+        for p in netD.parameters(): # reset requires_grad
+            p.requires_grad = True # they are set to False below in netG update
+
+        # train the discriminator Diters times
+        if gen_iterations < 25 or gen_iterations % 500 == 0:
+            Diters = 100
+        else:
+            Diters = opt.Diters
+        j = 0
+        while j < Diters and i < len(dataloader):
+            j += 1
+
+            # clamp parameters to a cube
+            for p in netD.parameters():
+                p.data.clamp_(opt.clamp_lower, opt.clamp_upper)
+
+            (colorImg,greyscaleImg) = data_iter.next()
+            asd()
+            i += 1
+
+            # train with real
+            netD.zero_grad()
+            batch_size = greyscaleImg.size(0)
+
+            if opt.cuda:
+                greyscaleImg = greyscaleImg.cuda()
+                colorImg = colorImg.cuda()
+            inputColor.resize_as_(colorImg).copy_(colorImg)
+            inputGrey.resize_as_(greyscaleImg).copy_(greyscaleImg)            
+            inputColorVar = Variable(inputColor)
+            inputGreyVar = Variable(inputGrey)
+
+            errD_real = netD(inputGreyVar, inputColorVar)
+            errD_real.backward(one)
+
+            # train with fake
+            noise.resize_(opt.batchSize, nz, 1, 1).normal_(0, 1)
+            noisev = Variable(noise, volatile = True) # totally freeze netG
+            fake = Variable(netG(noisev).data)
+            inputv = fake
+            errD_fake = netD(inputv)
+            errD_fake.backward(mone)
+            errD = errD_real - errD_fake
+            optimizerD.step()
+
+        ############################
+        # (2) Update G network
+        ###########################
+        for p in netD.parameters():
+            p.requires_grad = False # to avoid computation
+        netG.zero_grad()
+        # in case our last batch was the tail batch of the dataloader,
+        # make sure we feed a full batch of noise
+        noise.resize_(opt.batchSize, nz, 1, 1).normal_(0, 1)
+        noisev = Variable(noise)
+        fake = netG(noisev)
+        errG = netD(fake)
+        errG.backward(one)
+        optimizerG.step()
+        gen_iterations += 1
+
+        print('[%d/%d][%d/%d][%d] Loss_D: %f Loss_G: %f Loss_D_real: %f Loss_D_fake %f'
+            % (epoch, opt.niter, i, len(dataloader), gen_iterations,
+            errD.data[0], errG.data[0], errD_real.data[0], errD_fake.data[0]))
+        if gen_iterations % 500 == 0:
+            real_cpu = real_cpu.mul(0.5).add(0.5)
+            vutils.save_image(real_cpu, '{0}/real_samples.png'.format(opt.experiment))
+            fake = netG(Variable(fixed_noise, volatile=True))
+            fake.data = fake.data.mul(0.5).add(0.5)
+            vutils.save_image(fake.data, '{0}/fake_samples_{1}.png'.format(opt.experiment, gen_iterations))
+# for epoch in range(opt.niter):
+#     for i, (colorImg,greyscaleImg) in enumerate(dataloader, 0):
+#         ############################
+#         # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
+#         ###########################
+#         for p in netD.parameters(): # reset requires_grad
+#             p.requires_grad = True # they are set to False below in netG update
+
+#         # clamp parameters to a cube
+#         for p in netD.parameters():
+#             p.data.clamp_(opt.clamp_lower, opt.clamp_upper)
+
+#         netD.zero_grad()
+#         batch_size = greyscaleImg.size(0)
+#         if opt.cuda:
+#             greyscaleImg = greyscaleImg.cuda()
+#             colorImg = colorImg.cuda()
+#         greyscale.resize_as_(greyscaleImg).copy_(greyscaleImg)
+#         color.resize_as_(colorImg).copy_(colorImg)
+#         noise.resize_(batch_size, 1, 160, 96).normal_(0, 1)
+#         G_input = Variable(greyscale, volatile = True) + Variable(noise, volatile = True)
+#         greyscaleVar = Variable(greyscale)
+#         colorVar = Variable(color)
+
+#         output = netD(greyscaleVar, colorVar)
+#         errD_real = output
+#         errD_real.backward(one)
+#         D_x = output.data.mean()
+
+#         # train with fake
+#         fake = Variable(netG(G_input).data)
+#         errD_fake = netD(greyscaleVar.detach(),fake.detach())
+#         errD_fake.backward(mone)
+#         D_G_z1 = output.data.mean()
+#         errD = errD_real - errD_fake
+#         optimizerD.step()
+#         if i % 10 == 0 or gen_iterations > 10 and i % 3 == 0:
+#             ############################
+#             # (2) Update G network: maximize log(D(G(z)))
+#             ###########################
+#             for p in netD.parameters():
+#                 p.requires_grad = False # to avoid computation
+
+#             netG.zero_grad()
+
+#             noise.resize_(batch_size, 1, 160, 96).normal_(0, 1)
+#             noisev = Variable(noise)
+#             fake = netG(noisev)
+#             errG = netD(greyscaleVar.detach(), fake)
+#             errG.backward(one)
+#             D_G_z2 = output.data.mean()
+#             optimizerG.step()
+#             gen_iterations+=1
+
+#         print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f D(x): %.4f D(G(z)): %.4f / %.4f'
+#               % (epoch, opt.niter, i, len(dataloader),
+#                  errD.data[0], errG.data[0], D_x, D_G_z1, D_G_z2))
+
+#         with open('log.csv', 'a') as f:
+#             writer = csv.writer(f)
+#             writer.writerow([epoch, i, errD.data[0], errG.data[0], D_x, D_G_z1, D_G_z2])
+#         if i % 100 == 0:
+#             vutils.save_image(color,
+#                     '%s/real_samples.png' % opt.outf,
+#                     normalize=True)
+#             fixed_noise.resize_(batch_size, 1, 160, 96).normal_(0, 1)
+#             G_input_fixed = Variable(greyscale, volatile = True) + Variable(fixed_noise, volatile = True)
+#             fake = netG(G_input_fixed)
+#             vutils.save_image(fake.data,
+#                     '%s/fake_samples_epoch_%03d.png' % (opt.outf, epoch),
+#                     normalize=True)
+
+    # do checkpointing
+    torch.save(netG.state_dict(), '%s/netG_epoch_%d.pth' % (opt.outf, epoch))
+    torch.save(netD.state_dict(), '%s/netD_epoch_%d.pth' % (opt.outf, epoch))
