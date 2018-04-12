@@ -189,7 +189,7 @@ class _netG(nn.Module):
         )
         # state size. (ndf) x 32 x 32
         self.reverseLayer1 = nn.Sequential(
-            nn.ConvTranspose2d(ndf * 2, nc, 3, stride=2, padding=1, bias=False),
+            nn.ConvTranspose2d(ndf * 2, nc, (4,4), stride=2, padding=1, bias=False),
             nn.Tanh()
         )
 
@@ -236,31 +236,25 @@ class _netD(nn.Module):
         self.colorPre = nn.Sequential(
             # input is (nc) x 96 x 160
             nn.Conv2d(nc, ndf, 3, stride=2, padding=1),
-            nn.BatchNorm2d(ndf),
             nn.LeakyReLU(0.2, inplace=True)
         )
         self.greyscalePre = nn.Sequential(
             # input is (nc) x 96 x 160
             nn.Conv2d(1, ndf, 3, stride=2, padding=1),
-            nn.BatchNorm2d(ndf),
             nn.LeakyReLU(0.2, inplace=True)
         )
         self.main = nn.Sequential(
             # state size. (ndf) x 48 x 80
             nn.Conv2d(ndf*2, ndf * 2, 3, stride=2, padding=1),
-            nn.BatchNorm2d(ndf * 2),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*2) x 24 x 40
             nn.Conv2d(ndf * 2, ndf * 4, 3, stride=2, padding=1),
-            nn.BatchNorm2d(ndf * 4),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*4) x 12 x 20
             nn.Conv2d(ndf * 4, ndf * 8, 3, stride=2, padding=1),
-            nn.BatchNorm2d(ndf * 8),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*8) x 6 x 10
             nn.Conv2d(ndf * 8, 1, 3, stride=1, padding=0),
-            nn.BatchNorm2d(1),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. 1 x 4 x 8
             nn.Conv2d(1,1,(12,10),stride=1,padding=0),
@@ -286,7 +280,7 @@ if opt.netD != '':
     netD.load_state_dict(torch.load(opt.netD))
 print(netD)
 
-criterion = nn.BCELoss()
+criterion = nn.MSELoss()#nn.BCELoss()
 
 greyscale = torch.FloatTensor(opt.batchSize, 1, 218, 178)
 color = torch.FloatTensor(opt.batchSize, 3, 218, 178)
@@ -303,68 +297,75 @@ if opt.cuda:
     greyscale, color, label = greyscale.cuda(), color.cuda(), label.cuda()
 
 # setup optimizer
-optimizerD = optim.Adam(netD.parameters(), lr=opt.lr, betas=(opt.beta1, 0.99))
-optimizerG = optim.Adam(netG.parameters(), lr=opt.lr, betas=(opt.beta1, 0.99))
-loss_G = 1
+#optimizerD = optim.Adam(netD.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999)) #weight_decay=1
+optimizerG = optim.Adam(netG.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999)) #weight_decay=1
+
+cpt = 0
 for epoch in range(opt.niter):
     for i, (colorImg,greyscaleImg) in enumerate(dataloader, 0):
 
         if i == 157:
             break
         
+        cpt += 1
         ############################
         # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
         ###########################
         # train with real
-        netD.zero_grad()
-        batch_size = greyscaleImg.size(0)
+        # netD.zero_grad()
+        # batch_size = greyscaleImg.size(0)
         if opt.cuda:
             greyscaleImg = greyscaleImg.cuda()
             colorImg = colorImg.cuda()
         greyscale.resize_as_(greyscaleImg).copy_(greyscaleImg)
         color.resize_as_(colorImg).copy_(colorImg)
-        label.resize_(batch_size).fill_(real_label)
-        #label.resize_(batch_size).random_(0.7, 1.0)
+        # label.resize_(batch_size).fill_(real_label)
         greyscaleVar = Variable(greyscale)
         colorVar = Variable(color)
-        labelv = Variable(torch.rand(label.size())*0.3+0.7)#Variable(label)
+        # labelv = Variable(label)
 
-        output = netD(greyscaleVar + Variable(torch.rand(greyscaleImg.size())), colorVar)
-        errD_real = criterion(output, labelv)
-        errD_real.backward()
-        D_x = output.data.mean()
+        # output = netD(greyscaleVar + Variable(torch.rand(greyscaleImg.size())).cuda(), colorVar)
+        # errD_real = criterion(output, labelv)
+        # errD_real.backward()
+        # D_x = output.data.mean()
 
-        # train with fake
-        fake = netG(greyscaleVar.detach() + Variable(torch.rand(greyscaleImg.size())))
-        labelv = Variable(torch.rand(label.size())*0.3)
-        output = netD(greyscaleVar.detach() + Variable(torch.rand(greyscaleImg.size())),fake.detach())
-        errD_fake = criterion(output, labelv)
-        errD_fake.backward()
-        D_G_z1 = output.data.mean()
-        errD = errD_real + errD_fake
-        if errD.data[0] > 0.2:
-            optimizerD.step()
+        # # train with fake
+        # fake = netG(greyscaleVar.detach() + Variable(torch.rand(greyscaleImg.size())).cuda())
+        # labelv = Variable(label.fill_(fake_label))
+        # output = netD(greyscaleVar.detach() + Variable(torch.rand(greyscaleImg.size())).cuda(),fake.detach())
+        # errD_fake = criterion(output, labelv)
+        # errD_fake.backward()
+        # D_G_z1 = output.data.mean()
+        # errD = errD_real + errD_fake
+        # #if errD.data[0] > 0.2:
+        # optimizerD.step()
    
         ############################
         # (2) Update G network: maximize log(D(G(z)))
         ###########################
-        if i % 2 == 0:
-            netG.zero_grad()
-            labelv = Variable(torch.rand(label.size())*0.3+0.7)  # fake labels are real for generator cost
-            output = netD(greyscaleVar.detach(), fake)
-            errG = criterion(output, labelv)
-            errG.backward()
-            D_G_z2 = output.data.mean()
-            loss_G = errG.data[0]
-            optimizerG.step()
+        
+        #if i % 2 == 0:
+        netG.zero_grad()
+        # label.resize_(batch_size).fill_(real_label) # fake labels are real for generator cost
+        # output = netD(greyscaleVar.detach() + Variable(torch.rand(greyscaleImg.size())).cuda(), fake)
+        fake = netG(greyscaleVar.detach())
+        errG = criterion(fake, colorVar)
+        errG.backward()
+        #D_G_z2 = output.data.mean()
+        loss_G = errG.data[0]
+        optimizerG.step()
+
+        D_x = 0
+        D_G_z1 = 0
+        D_G_z2 = 0
 
         print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f D(x): %.4f D(G(z)): %.4f / %.4f'
               % (epoch, opt.niter, i, len(dataloader),
-                 errD.data[0], errG.data[0], D_x, D_G_z1, D_G_z2))
+                 0, errG.data[0], D_x, D_G_z1, D_G_z2))
 
         with open('log.csv', 'a') as f:
             writer = csv.writer(f)
-            writer.writerow([epoch, i, errD.data[0], errG.data[0], D_x, D_G_z1, D_G_z2])
+            writer.writerow([epoch, i, 0, errG.data[0], D_x, D_G_z1, D_G_z2])
         if i % 100 == 0:
             vutils.save_image(color,
                     '%s/real_samples.png' % opt.outf,
