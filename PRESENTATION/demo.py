@@ -7,6 +7,38 @@ from PIL import Image
 from torch.autograd import Variable
 import torchvision.utils as vutils
 
+
+def resize(image, size):
+	# crops image to wanted ratio then resizes it
+	# based on https://stackoverflow.com/questions/4744372/
+
+	width  = image.size[0]
+	height = image.size[1]
+	#print("original size : ", image.size)
+
+	aspect = width / float(height)
+
+	ideal_width = size[0]
+	ideal_height = size[1]
+
+	ideal_aspect = ideal_width / float(ideal_height)
+
+	if aspect > ideal_aspect:
+		# Then crop the left and right edges:
+		new_width = int(ideal_aspect * height)
+		offset = (width - new_width) / 2
+		resize = (offset, 0, width - offset, height)
+	else:
+		# ... crop the top and bottom:
+		new_height = int(width / ideal_aspect)
+		offset = (height - new_height) / 2
+		resize = (0, offset, width, height - offset)
+	
+	croped =  croped[resize[0]:resize[2]][resize[1]:resize[3]]
+	
+	result = cv2.resize(croped,(ideal_width, ideal_height), interpolation = cv2.INTER_CUBIC)
+	
+	return result
 class _netG(nn.Module):
     def __init__(self):
         super(_netG, self).__init__()
@@ -96,7 +128,8 @@ def take_picture(imgDim):
         w, h = img.shape[:2]
         img = img[:imgDim[1], int(h/2-imgDim[0]/2):int(h/2+imgDim[0]/2)]
         img = cv2.flip(img, 1)
-        bigImg = cv2.resize(img, (0,0), fx=4, fy=4) 
+		
+        bigImg = resize(img, (178, 218))
         cv2.imshow('webcam', bigImg)
         if cv2.waitKey(1) == 32: # space bar to take picture
             cv2.destroyAllWindows()
@@ -126,6 +159,8 @@ greyscaleVar = Variable(greyscale)
 print("Generating fake image ...")
 fake = model(greyscaleVar.detach())
 print("... Done generating fake image")
+
+fake = cv2.bilateralFilter(fake,9,75,75)
 
 vutils.save_image(fake.data,'img.png',normalize=True)
 
