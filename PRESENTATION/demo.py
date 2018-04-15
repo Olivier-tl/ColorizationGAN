@@ -8,6 +8,40 @@ from torch.autograd import Variable
 import torchvision.utils as vutils
 from os import listdir
 
+
+def resizeImage(image, size):
+	# crops image to wanted ratio then resizes it
+	# based on https://stackoverflow.com/questions/4744372/
+
+	width  = image.shape[0]
+	height = image.shape[1]
+	#print("original size : ", image.size)
+
+	aspect = width / float(height)
+
+	ideal_width = size[0]
+	ideal_height = size[1]
+
+	ideal_aspect = ideal_width / float(ideal_height)
+
+	if aspect > ideal_aspect:
+		# Then crop the left and right edges:
+		new_width = int(ideal_aspect * height)
+		offset = int((width - new_width) / 2)
+		resize = (offset, 0, width - offset, height)
+	else:
+		# ... crop the top and bottom:
+		new_height = int(width / ideal_aspect)
+		offset = int((height - new_height) / 2)
+		resize = (0, offset, width, height - offset)
+	print(resize)
+	croped =  image[resize[0]:resize[2],resize[1]:resize[3]]
+	
+	result = cv2.resize(croped,(ideal_width, ideal_height), interpolation = cv2.INTER_CUBIC)
+	
+	return result
+    
+
 class _netG(nn.Module):
     def __init__(self):
         super(_netG, self).__init__()
@@ -89,6 +123,7 @@ class _netG(nn.Module):
         resReverseLayer2 = self.reverseLayer2(torch.cat((resLayer2,resReverseLayer3), 1))
         output = self.reverseLayer1(torch.cat((resLayer1,resReverseLayer2), 1))
         return output
+
 
 class _netG_Conv(nn.Module):
     def __init__(self):
@@ -179,10 +214,16 @@ def take_picture(imgDim):
     while True:
         ret_val, img = cam.read()
         w, h = img.shape[:2]
-        img = img[:imgDim[1], int(h/2-imgDim[0]/2):int(h/2+imgDim[0]/2)]
+        #img = img[:imgDim[1], int(h/2-imgDim[0]/2):int(h/2+imgDim[0]/2)]
         img = cv2.flip(img, 1)
-        bigImg = cv2.resize(img, (0,0), fx=4, fy=4) 
+        img = img[::2,::2]
+        img = resizeImage(img, (178, 218))
+
+        
+        bigImg = cv2.resize(img, (0,0), fx=4, fy=4)
+
         cv2.imshow(winname, bigImg)
+
         if cv2.waitKey(1) == 32: # space bar to take picture
             cv2.destroyAllWindows()
             return img 
@@ -196,6 +237,7 @@ def take_picture(imgDim):
 while True:
     imgDim = (178, 218)
     img =  take_picture(imgDim)#cv2.imread(SOURCE+f)##
+    
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     model = _netG()
@@ -229,6 +271,7 @@ while True:
     fakeImg = cv2.imread("img.png")
     fakeImg_conv = cv2.imread("img_conv.png")
     grey_3_channel = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
 
     print("img shape", img.shape)
     print("fakeImg shape", fakeImg.shape)
