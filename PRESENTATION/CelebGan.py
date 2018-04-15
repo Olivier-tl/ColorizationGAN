@@ -133,31 +133,31 @@ class _netG(nn.Module):
         self.ngpu = ngpu
         # input is (nc) x 96 x 160
         self.layer1 = nn.Sequential(
-            nn.Conv2d(1, ndf, 3, stride=2, padding=1, bias=False),
+            nn.Conv2d(1, ndf, 5, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(ndf),
             nn.LeakyReLU(0.2, inplace=True)
         )
         # state size. (ndf) x 48 x 80
         self.layer2 = nn.Sequential(
-            nn.Conv2d(ndf, ndf * 2, 3, stride=2, padding=1, bias=False),
+            nn.Conv2d(ndf, ndf * 2, 4, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(ndf * 2),
             nn.LeakyReLU(0.2, inplace=True)
         )
         # state size. (ndf*2) x 24 x 40
         self.layer3 = nn.Sequential(
-            nn.Conv2d(ndf * 2, ndf * 4, 3, stride=2, padding=1, bias=False),
+            nn.Conv2d(ndf * 2, ndf * 4, 4, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(ndf * 4),
             nn.LeakyReLU(0.2, inplace=True)
         )
         # state size. (ndf*4) x 12 x 20
         self.layer4 = nn.Sequential(
-            nn.Conv2d(ndf * 4, ndf * 8, 3, stride=2, padding=1, bias=False),
+            nn.Conv2d(ndf * 4, ndf * 8, 4, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(ndf * 8),
             nn.LeakyReLU(0.2, inplace=True)
         )
         # state size. (ndf*8) x 6 x 10
         self.layer5 = nn.Sequential(
-            nn.Conv2d(ndf * 8, ndf * 8, 3, stride=1, padding=0, bias=False),
+            nn.Conv2d(ndf * 8, ndf * 8, 4, stride=1, padding=0, bias=False),
             nn.BatchNorm2d(ndf * 8),
             nn.LeakyReLU(0.2, inplace=True)
         )
@@ -165,31 +165,31 @@ class _netG(nn.Module):
         # Deconvolution Layers
         # state size. (ndf*8) x 4 x 8
         self.reverseLayer5 = nn.Sequential(
-            nn.ConvTranspose2d(ndf * 8, ndf * 8, 3, stride=1, padding=0, bias=False),
+            nn.ConvTranspose2d(ndf * 8, ndf * 8, 4, stride=1, padding=0, bias=False),
             nn.BatchNorm2d(ndf * 8),
             nn.ReLU(True)
         )
         # state size. (ndf*8) x 6 x 10
         self.reverseLayer4 = nn.Sequential(
-            nn.ConvTranspose2d(ndf * 16, ndf * 4, (4, 3), stride=2, padding=1, bias=False),
+            nn.ConvTranspose2d(ndf * 16, ndf * 4, 4, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(ndf * 4),
             nn.ReLU(True)
         )
         # state size. (ndf*4) x 12 x 20
         self.reverseLayer3 = nn.Sequential(
-            nn.ConvTranspose2d(ndf * 8, ndf * 2, 3, stride=2, padding=1, bias=False),
+            nn.ConvTranspose2d(ndf * 8, ndf * 2, 4, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(ndf * 2),
             nn.ReLU(True)
         )
         # state size. (ndf*2) x 16 x 16
         self.reverseLayer2 = nn.Sequential(
-            nn.ConvTranspose2d(ndf * 4, ndf, 3, stride=2, padding=1, bias=False),
+            nn.ConvTranspose2d(ndf * 4, ndf, 4, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(ndf),
             nn.ReLU(True)
         )
         # state size. (ndf) x 32 x 32
         self.reverseLayer1 = nn.Sequential(
-            nn.ConvTranspose2d(ndf * 2, nc, 3, stride=2, padding=1, bias=False),
+            nn.ConvTranspose2d(ndf * 2, nc, 4, stride=2, padding=0, bias=False),
             nn.Tanh()
         )
 
@@ -199,26 +199,26 @@ class _netG(nn.Module):
         # else:
         #     output = self.main(input)
         resLayer1 = self.layer1(input)
+        # print("L1 : ",resLayer1.shape)
         resLayer2 = self.layer2(resLayer1)
+        # print("L2 : ",resLayer2.shape)
         resLayer3 = self.layer3(resLayer2)
+        # print("L3 : ",resLayer3.shape)
         resLayer4 = self.layer4(resLayer3)
+        # print("L4 : ",resLayer4.shape)
         resLayer5 = self.layer5(resLayer4)
+        # print("L5 : ",resLayer5.shape)
         resReverseLayer5 = self.reverseLayer5(resLayer5)
-        resReverseLayer4 = self.reverseLayer4(torch.cat((resLayer4,resReverseLayer5), 1))
+        # print("RL6 : ",resReverseLayer5.shape)
+        resReverseLayer4 = Variable(torch.zeros_like(resLayer3.data))
+        resReverseLayer4[:,:,0:-1,:] = self.reverseLayer4(torch.cat((resLayer4,resReverseLayer5), 1))
+        # print("RL7 : ",resReverseLayer4.shape)
         resReverseLayer3 = self.reverseLayer3(torch.cat((resLayer3,resReverseLayer4), 1))
+        # print("RL8 : ",resReverseLayer3.shape) 
         resReverseLayer2 = self.reverseLayer2(torch.cat((resLayer2,resReverseLayer3), 1))
+        # print("RL9 : ",resReverseLayer2.shape)
         output = self.reverseLayer1(torch.cat((resLayer1,resReverseLayer2), 1))
-
-        # print(resLayer1.shape)
-        # print(resLayer2.shape)
-        # print(resLayer3.shape)
-        # print(resLayer4.shape)
-        # print(resLayer5.shape)
-        # print(resReverseLayer5.shape)
-        # print(resReverseLayer4.shape)
-        # print(resReverseLayer3.shape)
-        # print(resReverseLayer2.shape)
-        # print(output.shape)
+        # print("RL10 : ",output.shape)
         return output
 
 
@@ -235,13 +235,13 @@ class _netD(nn.Module):
         self.ngpu = ngpu
         self.colorPre = nn.Sequential(
             # input is (nc) x 96 x 160
-            nn.Conv2d(nc, ndf, 3, stride=2, padding=1),
+            nn.Conv2d(nc, ndf, 4, stride=2, padding=1),
             nn.BatchNorm2d(ndf),
             nn.LeakyReLU(0.2, inplace=True)
         )
         self.greyscalePre = nn.Sequential(
             # input is (nc) x 96 x 160
-            nn.Conv2d(1, ndf, 3, stride=2, padding=1),
+            nn.Conv2d(1, ndf, 4, stride=2, padding=1),
             nn.BatchNorm2d(ndf),
             nn.LeakyReLU(0.2, inplace=True)
         )
@@ -259,14 +259,13 @@ class _netD(nn.Module):
             nn.BatchNorm2d(ndf * 8),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*8) x 6 x 10
-            nn.Conv2d(ndf * 8, 1, 3, stride=1, padding=0),
+            nn.Conv2d(ndf * 8, 1, 3, stride=1, padding=1),
             nn.BatchNorm2d(1),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. 1 x 4 x 8
-            nn.Conv2d(1,1,(12,10),stride=1,padding=0),
+            nn.Conv2d(1,1,(14,12),stride=1,padding=0),
             nn.Sigmoid()
         )
-        # self.final = 
 
     def forward(self, greyscale, color):
         greyscale = self.greyscalePre(greyscale)
@@ -276,7 +275,7 @@ class _netD(nn.Module):
             output = nn.parallel.data_parallel(self.main, input, range(self.ngpu))
         else:
             output = self.main(input)
-        # output = self.final(output)
+        # print(output.shape)
         return output.view(-1, 1).squeeze(1)
 
 
@@ -286,7 +285,7 @@ if opt.netD != '':
     netD.load_state_dict(torch.load(opt.netD))
 print(netD)
 
-criterion = nn.BCELoss()
+criterion = nn.L1Loss()
 
 greyscale = torch.FloatTensor(opt.batchSize, 1, 218, 178)
 color = torch.FloatTensor(opt.batchSize, 3, 218, 178)
@@ -327,32 +326,44 @@ for epoch in range(opt.niter):
         #label.resize_(batch_size).random_(0.7, 1.0)
         greyscaleVar = Variable(greyscale)
         colorVar = Variable(color)
-        labelv = Variable(torch.rand(label.size())*0.3+0.7)#Variable(label)
+        labelv = Variable(torch.rand(label.size())*0.2+0.8).cuda()
 
-        output = netD(greyscaleVar + Variable(torch.rand(greyscaleImg.size())), colorVar)
+        output = netD(greyscaleVar, colorVar)
         errD_real = criterion(output, labelv)
         errD_real.backward()
         D_x = output.data.mean()
 
         # train with fake
-        fake = netG(greyscaleVar.detach() + Variable(torch.rand(greyscaleImg.size())))
-        labelv = Variable(torch.rand(label.size())*0.3)
-        output = netD(greyscaleVar.detach() + Variable(torch.rand(greyscaleImg.size())),fake.detach())
+        fake = netG(greyscaleVar.detach())
+        labelv = Variable(torch.rand(label.size())*0.0).cuda()
+        output = netD(greyscaleVar.detach(),fake.detach())
         errD_fake = criterion(output, labelv)
         errD_fake.backward()
         D_G_z1 = output.data.mean()
         errD = errD_real + errD_fake
-        if errD.data[0] > 0.2:
-            optimizerD.step()
    
         ############################
         # (2) Update G network: maximize log(D(G(z)))
         ###########################
-        if i % 2 == 0:
+        if epoch == 0:
+            if i == 0:
+                runGen = True
+            elif i > 100:
+                runGen = True
+            else:
+                runGen = False
+        elif i % 2 == 0:
+            runGen = True
+        else:
+            runGen = False
+
+        if runGen:
             netG.zero_grad()
-            labelv = Variable(torch.rand(label.size())*0.3+0.7)  # fake labels are real for generator cost
-            output = netD(greyscaleVar.detach(), fake)
+            labelv = Variable(torch.rand(label.size())*0.2+0.8).cuda()  # fake labels are real for generator cost
+            output = netD(greyscaleVar.detach(), fake.detach())
             errG = criterion(output, labelv)
+            # GAN + L1 (doesn't work)
+            # errG += criterion(fake, colorVar)
             errG.backward()
             D_G_z2 = output.data.mean()
             loss_G = errG.data[0]
