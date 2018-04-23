@@ -1,8 +1,12 @@
+###################################################
+##	generateGrayscale.py : utility script for converting color png image to greyscale using openCV
+##	@author Youri Runghen-Vezina 2018
+###################################################
 import cv2
 from os import listdir
 
-SOURCE = '/home/aksii/INF8225/GanProject/TRAIN/IMG_96_160'
-OUTDIR = '/home/aksii/INF8225/GanProject/TRAIN/GRAY'
+SOURCE = 'SOURCE_DIR'
+OUTDIR = 'DEST_DIR'
 
 for f in listdir(SOURCE):
     if not f.endswith('.png'):
