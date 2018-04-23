@@ -1,2 +1,7 @@
-*.jpg\n*.jpeg\n*.png\n*.gif\n
-*.jpg\n*.jpeg\n*.png\n*.gif\n
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.pth
+*.zip
+
